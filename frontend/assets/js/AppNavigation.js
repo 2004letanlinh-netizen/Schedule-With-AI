@@ -246,14 +246,15 @@
 
       console.log(`📦 Loading content for: ${sectionName}`);
 
-      if (window.ComponentLoader) {
-        if (!container.dataset.loaded || sectionName === "schedule") {
-          console.log(`🔥 Loading content dynamically...`);
-          await ComponentLoader.loadPageContent(sectionName);
-        } else {
-          console.log(`ℹ️ Content already loaded, re-initializing...`);
-          ComponentLoader.initializePageSpecific(containerId);
-        }
+      // LUÔN load content qua ComponentLoader (đơn giản hóa)
+      if (window.ComponentLoader && ComponentLoader.loadPageContent) {
+        console.log(`🔥 Loading content via ComponentLoader...`);
+        await ComponentLoader.loadPageContent(sectionName);
+      } else {
+        console.error(
+          `❌ ComponentLoader not available or missing loadPageContent`
+        );
+        return;
       }
 
       // Re-initialize modals và event handlers
@@ -270,7 +271,7 @@
         setTimeout(() => window.App.updateUserInfo(), 100);
       }
 
-      // Section-specific refresh logic - ĐẢM BẢO WORK LUÔN RELOAD
+      // Section-specific refresh logic
       setTimeout(() => {
         if (sectionName === "schedule" && window.CalendarModule) {
           console.log("🔄 Refreshing calendar...");

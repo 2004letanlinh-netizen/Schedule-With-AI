@@ -273,6 +273,14 @@
       }
     },
 
+    hideModal(modalId) {
+      this.close(modalId);
+    },
+
+    hideModalById(modalId) {
+      this.close(modalId);
+    },
+
     /**
      *
      * ✅ DEBUG HELPER

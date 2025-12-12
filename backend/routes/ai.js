@@ -158,7 +158,8 @@ function buildGeminiPrompt(
   startDate,
   endDate,
   options,
-  existingEvents
+  existingEvents,
+  additionalInstructions = ""
 ) {
   const taskList = taskDetails
     .map(
@@ -181,12 +182,14 @@ function buildGeminiPrompt(
     )
     .join("\n");
 
+  const additionalInstructionsText = additionalInstructions.trim()
+    ? `\nHƯỚNG DẪN THÊM CỦA NGƯỜI DÙNG: ${additionalInstructions}\n`
+    : "";
+
   return `Bạn là trợ lý lập lịch thông minh. Hãy sắp xếp các công việc sau vào lịch:
 
-  
 CÁC CÔNG VIỆC CẦN SẮP XẾP:
 ${taskList}
-
 
 KHOẢNG THỜI GIAN: Từ ${startDate} đến ${endDate}
 
@@ -203,9 +206,7 @@ YÊU CẦU:
   }
 4. Xếp việc vào thời điểm thích hợp của nó (morning/noon/afternoon/evening)
 5. Mỗi ngày không quá 8 tiếng làm việc
-6. Làm việc từ 8:00 đến 22:00
-HƯỚNG DẪN THÊM: ${additionalInstructions};
-
+6. Làm việc từ 8:00 đến 22:00${additionalInstructionsText}
 
 Hãy trả về KẾT QUẢ dưới dạng JSON (CHỈ TRẢ VỀ JSON, KHÔNG GIẢI THÍCH):
 
@@ -406,6 +407,8 @@ router.post("/suggest-schedule", authenticateToken, async (req, res) => {
     const { tasks: taskIds, startDate, endDate, options = {} } = req.body;
     const additionalInstructions = req.body.additionalInstructions || "";
 
+    console.log("Additional instructions:", additionalInstructions);
+
     if (!taskIds || !Array.isArray(taskIds) || taskIds.length === 0) {
       return res.status(400).json({
         success: false,
@@ -451,17 +454,26 @@ router.post("/suggest-schedule", authenticateToken, async (req, res) => {
     if (geminiAvailable) {
       try {
         console.log("Attempting to use Gemini AI...");
+
         const prompt = buildGeminiPrompt(
           taskDetails,
           startDate,
           endDate,
           options,
-          existingEvents
+          existingEvents,
+          additionalInstructions
+        );
+
+        console.log(
+          "Prompt with additional instructions:",
+          prompt.substring(0, 500) + "..."
         );
 
         aiResult = await callGeminiAI(prompt);
         mode = "gemini";
-        console.log("Gemini AI processed successfully");
+        console.log(
+          "Gemini AI processed successfully with additional instructions"
+        );
       } catch (aiError) {
         console.error("Gemini AI failed:", aiError.message);
         aiResult = await generateSimulatedSchedule(
@@ -474,12 +486,13 @@ router.post("/suggest-schedule", authenticateToken, async (req, res) => {
         mode = "simulation_fallback";
       }
     } else {
-      aiResult = await generateSimulatedSchedule(
+      aiResult = await generateSimulatedScheduleWithInstructions(
         taskDetails,
         startDate,
         endDate,
         options,
-        existingEvents
+        existingEvents,
+        additionalInstructions
       );
       mode = "simulation";
     }
@@ -521,7 +534,8 @@ router.post("/suggest-schedule", authenticateToken, async (req, res) => {
       },
       message:
         mode === "gemini"
-          ? "AI đã tạo lịch trình thành công"
+          ? "AI đã tạo lịch trình thành công" +
+            (additionalInstructions ? " với hướng dẫn bổ sung" : "")
           : "Đã tạo lịch trình (chế độ mô phỏng)",
     };
 
@@ -543,6 +557,43 @@ router.post("/suggest-schedule", authenticateToken, async (req, res) => {
   }
 });
 
+async function generateSimulatedScheduleWithInstructions(
+  taskDetails,
+  startDate,
+  endDate,
+  options,
+  existingEvents,
+  additionalInstructions = ""
+) {
+  console.log("Generating simulated schedule with instructions...");
+  console.log("Additional instructions:", additionalInstructions);
+
+  // Sử dụng hàm cũ và thêm xử lý cho instructions nếu cần
+  const baseSchedule = await generateSimulatedSchedule(
+    taskDetails,
+    startDate,
+    endDate,
+    options,
+    existingEvents
+  );
+
+  // Nếu có additionalInstructions, có thể điều chỉnh schedule ở đây
+  if (additionalInstructions.trim()) {
+    console.log("Applying additional instructions to simulated schedule...");
+
+    // Có thể thêm logic xử lý instructions đơn giản ở đây
+    // Ví dụ: thêm note về instructions vào reason
+    baseSchedule.suggestions = baseSchedule.suggestions.map((suggestion) => ({
+      ...suggestion,
+      reason: suggestion.reason + " (Có hướng dẫn bổ sung từ người dùng)",
+    }));
+
+    baseSchedule.summary = `Đã tạo ${baseSchedule.suggestions.length} khung giờ với hướng dẫn bổ sung`;
+  }
+
+  return baseSchedule;
+}
+
 router.post("/save-ai-suggestions", authenticateToken, async (req, res) => {
   const { suggestions } = req.body;
   const userId = req.userId;
@@ -553,11 +604,20 @@ router.post("/save-ai-suggestions", authenticateToken, async (req, res) => {
 
   try {
     const pool = await dbPoolPromise;
+
+    // ✅ 1. XÓA TẤT CẢ AI SUGGESTIONS CŨ
+    await pool.request().input("userId", sql.Int, userId).query(`
+        DELETE FROM LichTrinh 
+        WHERE UserID = @userId AND AI_DeXuat = 1
+      `);
+
+    // ✅ 2. LƯU AI SUGGESTIONS MỚI
+    const savedIds = [];
     for (const s of suggestions) {
       const start = new Date(s.scheduledTime);
       const end = new Date(start.getTime() + s.durationMinutes * 60000);
 
-      await pool
+      const result = await pool
         .request()
         .input("taskId", sql.Int, s.taskId)
         .input("startTime", sql.DateTime, start)
@@ -565,16 +625,29 @@ router.post("/save-ai-suggestions", authenticateToken, async (req, res) => {
         .input("note", sql.NVarChar, s.reason || "AI đề xuất")
         .input("color", sql.NVarChar, s.color || "#8B5CF6")
         .input("userId", sql.Int, userId).query(`
-  INSERT INTO LichTrinh 
-    (MaCongViec, GioBatDau, GioKetThuc, GhiChu, AI_DeXuat, UserID)
-  VALUES 
-    (@taskId, @startTime, @endTime, @note, 1, @userId)
-`);
+          INSERT INTO LichTrinh 
+            (MaCongViec, GioBatDau, GioKetThuc, GhiChu, AI_DeXuat, UserID)
+          OUTPUT INSERTED.MaLichTrinh
+          VALUES 
+            (@taskId, @startTime, @endTime, @note, 1, @userId)
+        `);
+
+      if (result.recordset[0]) {
+        savedIds.push(result.recordset[0].MaLichTrinh);
+      }
     }
-    console.log(`Đã lưu ${suggestions.length} lịch AI cho user ${userId}`);
-    res.json({ success: true, saved: suggestions.length });
+
+    console.log(
+      `✅ Đã lưu ${savedIds.length} lịch AI mới, xóa lịch cũ cho user ${userId}`
+    );
+
+    res.json({
+      success: true,
+      saved: savedIds.length,
+      savedIds: savedIds,
+    });
   } catch (err) {
-    console.error("Lỗi lưu AI suggestions:", err);
+    console.error("❌ Lỗi lưu AI suggestions:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
@@ -591,6 +664,45 @@ router.get("/test", authenticateToken, (req, res) => {
   });
 });
 
+router.delete("/clear-old-suggestions", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const pool = await dbPoolPromise;
+
+    // 1. Đếm số lượng AI suggestions cũ
+    const countResult = await pool.request().input("userId", sql.Int, userId)
+      .query(`
+        SELECT COUNT(*) as count 
+        FROM LichTrinh 
+        WHERE UserID = @userId AND AI_DeXuat = 1
+      `);
+
+    const oldCount = countResult.recordset[0]?.count || 0;
+
+    // 2. Xóa tất cả AI suggestions cũ
+    const deleteResult = await pool.request().input("userId", sql.Int, userId)
+      .query(`
+        DELETE FROM LichTrinh 
+        WHERE UserID = @userId AND AI_DeXuat = 1
+      `);
+
+    console.log(`🗑️ Cleared ${oldCount} old AI suggestions for user ${userId}`);
+
+    res.json({
+      success: true,
+      clearedCount: oldCount,
+      message: `Đã xóa ${oldCount} lịch trình AI cũ`,
+    });
+  } catch (error) {
+    console.error("❌ Error clearing old AI suggestions:", error);
+    res.status(500).json({
+      success: false,
+      message: "Lỗi khi xóa lịch trình AI cũ",
+      error: error.message,
+    });
+  }
+});
+
 router.get("/events/ai", authenticateToken, async (req, res) => {
   const userId = req.userId;
 
@@ -605,12 +717,13 @@ router.get("/events/ai", authenticateToken, async (req, res) => {
           lt.GhiChu,
           cv.TieuDe,
           cv.MucDoUuTien,
-          cv.MauSac AS ColorHex   -- LẤY MÀU TỪ BẢNG CongViec
+          cv.MauSac AS Color
         FROM LichTrinh lt
         INNER JOIN CongViec cv ON lt.MaCongViec = cv.MaCongViec
         WHERE cv.UserID = @userId 
           AND lt.AI_DeXuat = 1
-        ORDER BY lt.GioBatDau
+          AND lt.GioBatDau >= DATEADD(day, -30, GETDATE()) -- Chỉ lấy 30 ngày gần nhất
+        ORDER BY lt.GioBatDau DESC
       `);
 
     const events = result.recordset.map((ev) => ({
@@ -620,7 +733,7 @@ router.get("/events/ai", authenticateToken, async (req, res) => {
       GioBatDau: ev.GioBatDau,
       GioKetThuc: ev.GioKetThuc,
       GhiChu: ev.GhiChu || "AI đề xuất",
-      Color: ev.ColorHex || "#8B5CF6", // Dùng MauSac từ CongViec
+      Color: ev.Color || "#8B5CF6",
       priority: ev.MucDoUuTien,
     }));
 
