@@ -1,8 +1,9 @@
+<!-- AI Suggestion Modal - Complete Fixed Version -->
 <div id="aiSuggestionModal" class="modal">
   <!-- Modal Overlay -->
   <div
     class="modal-overlay"
-    onclick="if(window.ModalManager && ModalManager.hideModal) ModalManager.hideModal('aiSuggestionModal')"
+    onclick="ModalManager.hideModalById('aiSuggestionModal')"
   ></div>
 
   <!-- Modal Content -->
@@ -20,7 +21,7 @@
       </div>
       <button
         class="modal-close"
-        onclick="if (window.AIHandler && AIHandler.closeModal) { AIHandler.closeModal(); }"
+        onclick="ModalManager.hideModalById('aiSuggestionModal')"
       >
         <i class="fas fa-times"></i>
       </button>
@@ -139,7 +140,7 @@
       <button
         type="button"
         class="btn btn-secondary"
-        onclick="if (window.AIHandler && AIHandler.closeModal) { AIHandler.closeModal(); }"
+        onclick="ModalManager.hideModalById('aiSuggestionModal')"
       >
         <i class="fas fa-times"></i>
         <span>Đóng</span>
