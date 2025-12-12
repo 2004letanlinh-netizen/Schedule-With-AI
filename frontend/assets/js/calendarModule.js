@@ -122,6 +122,7 @@
     // ==========================================================
     // LOAD EVENTS FROM SERVER - FIXED FIELD NAMES
     // ==========================================================
+    // SỬA FILE: calendarModule.js - HÀM loadEvents()
     async loadEvents() {
       if (!Utils?.makeRequest) {
         console.warn("Utils.makeRequest không tồn tại → trả về mảng rỗng");
@@ -132,7 +133,16 @@
         const res = await Utils.makeRequest("/api/calendar/events", "GET");
         if (!res.success || !Array.isArray(res.data)) return [];
 
-        return res.data.map((ev) => ({
+        // ✅ THÊM FILTER ĐỂ LOẠI BỎ AI EVENTS KHỎI LỊCH THƯỜNG
+        const normalEvents = res.data.filter((ev) => {
+          const isAI =
+            ev.AI_DeXuat === 1 ||
+            ev.extendedProps?.aiSuggested === true ||
+            ev.isAISuggestion === true;
+          return !isAI; // Chỉ lấy events không phải AI
+        });
+
+        return normalEvents.map((ev) => ({
           id: ev.id || ev.MaLichTrinh || 0,
           title: ev.title || ev.TieuDe || "Không tiêu đề",
           start: ev.start || ev.GioBatDau || new Date().toISOString(),
@@ -144,9 +154,11 @@
             note: ev.GhiChu || ev.extendedProps?.note || "",
             completed:
               ev.DaHoanThanh === 1 || ev.extendedProps?.completed || false,
-            // SỬA DÒNG NÀY: đổi "taskId" thành "taskIdValue" hoặc biến khác
             taskId: ev.MaCongViec || ev.extendedProps?.taskId || null,
             isFromDrag: ev.isFromDrag || false,
+            // ✅ THÊM FLAG ĐỂ PHÂN BIỆT AI/THƯỜNG
+            isAIEvent:
+              ev.AI_DeXuat === 1 || ev.extendedProps?.aiSuggested || false,
           },
         }));
       } catch (err) {

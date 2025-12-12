@@ -352,10 +352,11 @@ router.get("/range", async (req, res) => {
   }
 });
 
+// Đảm bảo endpoint này đã có trong event.js
 router.get("/ai-events", async (req, res) => {
   try {
     const userId = req.user.UserID;
-    console.log(` Fetching AI events for user: ${userId}`);
+    console.log(`🤖 Fetching AI events for user: ${userId}`);
 
     const pool = await dbPoolPromise;
 
@@ -373,20 +374,19 @@ router.get("/ai-events", async (req, res) => {
           cv.TieuDe,
           cv.MoTa,
           cv.NgayTao AS CongViecNgayTao,
-          cv.MauSac
+          cv.MauSac AS Color,
+          cv.MucDoUuTien
         FROM LichTrinh lt
         LEFT JOIN CongViec cv ON lt.MaCongViec = cv.MaCongViec
-        LEFT JOIN LoaiCongViec lc ON cv.MaLoai = lc.MaLoai
         WHERE lt.UserID = @userId 
-          AND lt.AI_DeXuat = 1  -- Chỉ lấy events do AI đề xuất
+          AND lt.AI_DeXuat = 1  -- CHỈ LẤY AI SUGGESTIONS
         ORDER BY lt.GioBatDau ASC
       `);
 
     console.log(
-      ` Found ${result.recordset.length} AI events for user ${userId}`
+      `🤖 Found ${result.recordset.length} AI events for user ${userId}`
     );
 
-    // Xử lý dữ liệu
     const events = result.recordset.map((ev) => {
       return {
         ID: ev.ID || 0,
@@ -400,13 +400,13 @@ router.get("/ai-events", async (req, res) => {
         DaHoanThanh: ev.DaHoanThanh,
         GhiChu: ev.GhiChu || "",
         AI_DeXuat: ev.AI_DeXuat,
-        MaMau: ev.MauSac || "#8B5CF6",
-        Color: ev.MauSac || "#8B5CF6",
-        backgroundColor: ev.MauSac || "#8B5CF6",
+        Color: ev.Color || "#8B5CF6",
+        backgroundColor: ev.Color || "#8B5CF6",
+        priority: ev.MucDoUuTien || 2,
         extendedProps: {
           note: ev.GhiChu || "",
           completed: ev.DaHoanThanh || false,
-          aiSuggested: true,
+          aiSuggested: true, // Đánh dấu đây là AI suggestion
           taskId: ev.MaCongViec || null,
           description: ev.MoTa || "",
           created: ev.CongViecNgayTao || ev.LichTrinhNgayTao,
